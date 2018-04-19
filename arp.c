@@ -117,9 +117,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Invalid address\n");
         exit(EXIT_FAILURE);
   }
-	//unsigned char test[4];
 	memcpy(pc1_ip, &pc1_addr.sin_addr.s_addr, 4);
-	//test = inet_ntoa(pc1_addr.sin_addr);
 
 	printf("PC1 IP: %d.%d.%d.%d\n",pc1_ip[0],pc1_ip[1],pc1_ip[2],pc1_ip[3]);
 
@@ -132,18 +130,45 @@ int main(int argc, char *argv[])
 
 	while (1)
 	{
-		numbytes = recvfrom(sockfd, buffer_u.raw_data, ETH_LEN, 0, NULL, NULL); //(struct sockaddr*)&pc1_addr
-		printf("packet size: %d\n", numbytes);
-		if (buffer_u.cooked_data.ethernet.eth_type == ntohs(ETH_P_ARP) && buffer_u.cooked_data.payload.arp.operation == ARP_REPLY)
+		numbytes = recvfrom(sockfd, buffer_u.raw_data, ETH_LEN, 0, (struct sockaddr*)&pc1_addr, NULL); //
+		if (buffer_u.cooked_data.ethernet.eth_type == ntohs(ETH_P_ARP) && buffer_u.cooked_data.payload.arp.operation == htons(ARP_REPLY))
 		{
 			memcpy(pc1_mac, buffer_u.cooked_data.payload.arp.src_hwaddr, 6);
 			break;
 		}
 	}
 
-		printf("PC1 MAC: %x:%x%x:%x:%x:%x\n", pc1_mac[0],pc1_mac[1],pc1_mac[2],pc1_mac[3],pc1_mac[4],pc1_mac[5]);
+	printf("PC1 MAC: %x:%x%x:%x:%x:%x\n", pc1_mac[0],pc1_mac[1],pc1_mac[2],pc1_mac[3],pc1_mac[4],pc1_mac[5]);
 
 	/* Get the MAC address of the computer 2 */
+	pc2_addr.sin_family = AF_INET;
+	if (inet_aton(pc2_ip_string, &pc2_addr.sin_addr) == 0)
+	{
+        fprintf(stderr, "Invalid address\n");
+        exit(EXIT_FAILURE);
+  }
+	memcpy(pc2_ip, &pc2_addr.sin_addr.s_addr, 4);
+
+	printf("PC2 IP: %d.%d.%d.%d\n",pc2_ip[0],pc2_ip[1],pc2_ip[2],pc2_ip[3]);
+
+		/* ARP Request to get MAC of the computer 1*/
+	buffer_u = fill_arp(my_ip, my_mac, pc2_ip, bcast_mac, 1);
+
+	memcpy(socket_address.sll_addr, bcast_mac, 6);
+	if (sendto(sockfd, buffer_u.raw_data, sizeof(struct eth_hdr) + sizeof(struct arp_packet), 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
+		printf("Send failed\n");
+
+	while (1)
+	{
+		numbytes = recvfrom(sockfd, buffer_u.raw_data, ETH_LEN, 0, (struct sockaddr*)&pc2_addr, NULL); //
+		if (buffer_u.cooked_data.ethernet.eth_type == ntohs(ETH_P_ARP) && buffer_u.cooked_data.payload.arp.operation == htons(ARP_REPLY))
+		{
+			memcpy(pc2_mac, buffer_u.cooked_data.payload.arp.src_hwaddr, 6);
+			break;
+		}
+	}
+
+	printf("PC1 MAC: %x:%x%x:%x:%x:%x\n", pc2_mac[0],pc2_mac[1],pc2_mac[2],pc2_mac[3],pc2_mac[4],pc2_mac[5]);
 
 
 	/* End of configuration. Now we can send and receive data using raw sockets. */
