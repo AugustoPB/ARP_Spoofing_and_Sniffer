@@ -2,6 +2,8 @@
 #define ETH_LEN	1518
 #define ETHER_TYPE	0x0800
 #define DEFAULT_IF	"eth0"
+#define PROTO_UDP	17
+#define DST_PORT	8000
 #define ARP_REQUEST 1
 #define ARP_REPLY 2
 
@@ -36,9 +38,22 @@ struct ip_hdr {
 	uint8_t dst[4];			/* destination address */
 };
 
+struct udp_hdr {
+	uint16_t src_port;
+	uint16_t dst_port;
+	uint16_t udp_len;
+	uint16_t udp_chksum;
+};
+
+struct udp_packet {
+	struct ip_hdr iphdr;
+	struct udp_hdr udphdr;
+};
+
 union packet_u {
 	struct arp_packet arp;
 	struct ip_hdr ip;
+	struct udp_packet udp;
 };
 
 struct eth_frame_s {

